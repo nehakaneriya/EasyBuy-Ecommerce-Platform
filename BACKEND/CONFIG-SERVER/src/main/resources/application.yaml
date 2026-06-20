@@ -7,9 +7,9 @@ spring:
     config:
       server:
         git:
-          uri: ${GIT_URI:https://github.com/nehakaneriya/easybuy-config-repo.git}
-          username: ${GIT_USERNAME:nehakaneriya}
-          password: ${GIT_PASSWORD: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}
+          uri: ${GIT_URI}
+          username: ${GIT_USERNAME}
+          password: ${GIT_PASSWORD}
           defaultLabel: main
 management:
   endpoints:
