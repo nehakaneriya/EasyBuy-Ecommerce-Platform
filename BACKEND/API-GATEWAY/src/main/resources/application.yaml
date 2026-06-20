@@ -1,0 +1,61 @@
+server:
+  port: 1010
+
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 60000
+  application:
+    name: API-GATEWAY
+  config:
+    import:
+      configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+  cloud:
+    gateway:
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: false
+              lower-case-service-id: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          "*"
+  health:
+    probes:
+      enabled: true
+    config:
+      enabled: false
+
+# Eureka Client Configuration
+resilience4j:
+  circuitbreaker:
+    configs:
+        default:
+            slidingWindowSize: 10
+            failureRateThreshold: 50
+            waitDurationInOpenState: 10000
+            permittedNumberOfCallsInHalfOpenState: 2
+product:
+  service:
+    id: lb://PRODUCT-SERVICE
+
+cart:
+  order:
+    service:
+      id: lb://CART-ORDER-SERVICE
+
+user:
+  service:
+    id: lb://USER-SERVICE
+
+inventory:
+  service:
+    id: lb://INVENTORY-SERVICE
+

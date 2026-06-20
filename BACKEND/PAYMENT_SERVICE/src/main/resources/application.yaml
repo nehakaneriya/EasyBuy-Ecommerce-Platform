@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: PAYMENT-SERVICE
+  config:
+    import:
+      configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+  profiles:
+    active:
+      - dev

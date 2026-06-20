@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  kafka:
+    # Official Apache Kafka image
+    image: apache/kafka:latest
+
+    # Container name visible in Docker
+    container_name: kafka
+
+    # Expose Kafka port to host machine
+    ports:
+      #Host port : Container port
+      - "9092:9092"
+
+    environment:
+
+      # Unique identifier for this Kafka node
+      KAFKA_NODE_ID: 1
+
+      # This node acts as both Broker and Controller (KRaft mode)
+      #Broker: Handles client requests and manages data storage
+      #Controller: Manages cluster metadata and orchestrates broker activities
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      # Ports on which Kafka listens to
+      # 9092 -> Client/Broker communication
+      # 9093 -> Controller communication
+      # 29092 -> Host access to Kafka (mapped to 9092 inside container)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
+
+      # Address clients use to connect to Kafka
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+
+      # Controller listener name
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # Security protocol mapping for listeners
+      #protocol: protocol is used to define how different listeners communicate with each other and with clients.
+      #listener_name: The name of the listener that is being defined.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+
+      # Inter-broker communication listener name
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Controller quorum configuration
+      # Format: nodeId@host:port
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+
+      # Replication factor for internal offsets topic
+      # 1 because this is a single-node Kafka setup
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+    volumes:
+        # Persist Kafka data to host machine to ensure data is not lost when container restarts
+        - kafka-data:/var/lib/kafka/data
+    networks:
+        - kafka-network
+
+  kafka-ui:
+    # Kafka UI image for managing and monitoring Kafka
+    image: provectuslabs/kafka-ui:latest
+
+    # Container name visible in Docker
+    container_name: kafka-ui
+
+    # Ensure Kafka UI starts after Kafka is ready
+    depends_on:
+      - kafka
+
+    # Expose Kafka UI port to host machine
+    ports:
+      #Host port : Container port
+      - "7575:8080"
+
+    environment:
+      # Kafka cluster configuration for the UI
+      KAFKA_CLUSTERS_0_NAME: local-kafka
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+        - kafka-network
+
+networks:
+  kafka-network:
+
+volumes:
+    kafka-data:

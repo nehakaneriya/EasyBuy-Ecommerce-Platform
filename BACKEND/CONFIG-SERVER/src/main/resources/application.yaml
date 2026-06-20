@@ -1,0 +1,30 @@
+server:
+  port: 8888
+spring:
+  application:
+    name: CONFIG-SERVER
+  cloud:
+    config:
+      server:
+        git:
+          uri: ${GIT_URI:https://github.com/nehakaneriya/easybuy-config-repo.git}
+          username: ${GIT_USERNAME:nehakaneriya}
+          password: ${GIT_PASSWORD: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}
+          defaultLabel: main
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          "*"
+encrypt:
+  key: 8455487454545cbygecgehcuebfgdc6cuchxjn54
+
+# Eureka Client Configuration
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
