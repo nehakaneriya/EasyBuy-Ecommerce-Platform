@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🛒 EasyBuy — Full Stack E-Commerce Platform
 
 > A production-ready, microservices-based e-commerce platform built with **Java Spring Boot** (backend) and **React + TypeScript** (frontend).
@@ -327,3 +328,7 @@ EASY_BUY/
 ## License
 
 This project is for educational purposes.
+=======
+# EasyBuy-Ecommerce-Platform
+A scalable E-Commerce backend built using Spring Boot Microservices architecture with API Gateway, Eureka Service Discovery, Config Server, Kafka, Redis, RabbitMQ, JWT Authentication, and MySQL.
+>>>>>>> 6b94722f86abaf484a4271e8f7d645ea93078f6b
