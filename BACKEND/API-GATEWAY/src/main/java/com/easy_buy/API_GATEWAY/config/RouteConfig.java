@@ -20,13 +20,16 @@ public class RouteConfig {
     private final String productServiceID;
     private final String CartOrderServiceID;
     private final String userServiceID;
+    private final AuthenticationFilter authFilter;
 
     public RouteConfig(@Value("${product.service.id}") String productServiceID,
                        @Value("${cart.order.service.id}") String CartOrderServiceID,
-                       @Value("${user.service.id}") String userServiceID) {
+                       @Value("${user.service.id}") String userServiceID,
+                       AuthenticationFilter authFilter) {
         this.productServiceID = productServiceID;
         this.CartOrderServiceID = CartOrderServiceID;
         this.userServiceID = userServiceID;
+        this.authFilter = authFilter;
     }
 
     @Bean
@@ -37,6 +40,7 @@ public class RouteConfig {
                 .route("product-service", r -> r
                         .path("/product-service/**")
                         .filters(f -> f
+                                .filter(authFilter.apply(new AuthenticationFilter.Config()))
                                 .stripPrefix(1)
                                 .requestRateLimiter(rateLimiterConfig -> rateLimiterConfig.setKeyResolver(KeyResolver())
                                         .setRateLimiter(redisRateLimiter())
@@ -47,7 +51,9 @@ public class RouteConfig {
 
                 .route("cart-order-service", r -> r
                         .path("/cart-order-service/**")
-                        .filters(f -> f.stripPrefix(1)
+                        .filters(f -> f
+                                .filter(authFilter.apply(new AuthenticationFilter.Config()))
+                                .stripPrefix(1)
 
                                 .retry(retryConfig ->
                                         retryConfig
@@ -64,7 +70,9 @@ public class RouteConfig {
 
                 .route("user-service", r -> r
                         .path("/user-service/**")
-                        .filters(f -> f.stripPrefix(1))
+                        .filters(f -> f
+                                .filter(authFilter.apply(new AuthenticationFilter.Config()))
+                                .stripPrefix(1))
                         .uri(userServiceID))
 
                 .build();

@@ -23,13 +23,6 @@ public class UserController {
 
     private final UserService userService;
 
-    // POST /api/users/register - Register a new user
-    @PostMapping("/register")
-    public ResponseEntity<UserDto> registerUser(@Valid @RequestBody RegisterRequest request) {
-        UserDto user = userService.registerUser(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(user);
-    }
-
     // GET /api/users - Get all users with pagination
     @GetMapping
     public ResponseEntity<PagedResponse<UserDto>> getAllUsers(
