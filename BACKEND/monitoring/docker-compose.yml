@@ -1,4 +1,15 @@
 services:
+  tempo:
+    image: grafana/tempo:2.8.2
+    container_name: tempo
+    ports:
+      - "3200:3200" #Tempo UI
+      - "4317:4317" #OTLP gRPC
+      - "4318:4318"
+    command:
+      - --config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml
   loki:
     image: grafana/loki:latest
     ports:
@@ -16,6 +27,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
       - loki
+      - tempo
 
   alloy:
     image: grafana/alloy:latest
@@ -37,3 +49,4 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
