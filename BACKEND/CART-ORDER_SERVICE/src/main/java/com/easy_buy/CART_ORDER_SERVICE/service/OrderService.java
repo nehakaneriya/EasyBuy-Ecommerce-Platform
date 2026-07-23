@@ -25,4 +25,6 @@ public interface OrderService {
 
     // Releases reserved stock for a specific product and quantity, typically called when an order is canceled or fails
     void releaseReservedStock(UUID productId,Integer quantity);
+
+    void updatePaymentStatus(UUID orderId, String paymentStatus);
 }

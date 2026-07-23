@@ -1,5 +1,6 @@
 package com.easy_buy.CART_ORDER_SERVICE.service.impl;
 
+import com.easy_buy.CART_ORDER_SERVICE.dtos.InventorySnapshot;
 import com.easy_buy.CART_ORDER_SERVICE.entity.*;
 import com.easy_buy.CART_ORDER_SERVICE.exception.BusinessRuleException;
 import com.easy_buy.CART_ORDER_SERVICE.exception.ExternalServiceException;
@@ -7,6 +8,7 @@ import com.easy_buy.CART_ORDER_SERVICE.exception.ResourceNotFoundException;
 import com.easy_buy.CART_ORDER_SERVICE.client.InventoryFeignClient;
 import com.easy_buy.CART_ORDER_SERVICE.payload.request.CheckoutRequest;
 import com.easy_buy.CART_ORDER_SERVICE.payload.request.ReleaseStockRequest;
+import com.easy_buy.CART_ORDER_SERVICE.payload.request.ReserveStockRequest;
 import com.easy_buy.CART_ORDER_SERVICE.payload.response.OrderItemResponse;
 import com.easy_buy.CART_ORDER_SERVICE.payload.response.OrderResponse;
 import com.easy_buy.CART_ORDER_SERVICE.producer.OrderEventPublisher;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -51,26 +54,52 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessRuleException("Cannot checkout an empty cart");
         }
 
-        //Convert cart into order
-        Order order = buildOrderFromCart(cart, request);
-        Order savedOrder = orderRepository.save(order);
-        cart.getCartItems().clear();
-        cart.setCartTotal(BigDecimal.ZERO);
-        cart.setCartStatus(CartStatus.CHECKED_OUT);
-        cart.setCheckedOutAt(Instant.now());
-        cartRepository.save(cart);
 
-        // Publish order event to Kafka
+        List<InventorySnapshot> reservedSnapshots = new ArrayList<>();
 
-        OrderEvent orderEvent = new OrderEvent();
-        orderEvent.setOrderId(savedOrder.getOrderId());
-        orderEvent.setUserId(savedOrder.getUserId());
-        orderEvent.setStatus(savedOrder.getOrderStatus().name());
-        orderEvent.setMessage("Order created successfully");
-        orderEvent.setTotalAmount(savedOrder.getTotalAmount());
-        orderEventPublisher.publishOrderEvent(orderEvent);
+        try {
 
-        return toResponse(savedOrder);
+            // Reserve stock for each cart item, ek-ek karke
+            for (CartItem item : cart.getCartItems()) {
+
+                reservedSnapshots.add(inventoryClient.reserveByProductId(item.getProductId(), new ReserveStockRequest(item.getQuantity())));
+            }
+
+            Order order = buildOrderFromCart(cart, request);
+            Order savedOrder = orderRepository.save(order);
+
+            // Cart ko checkout karne ke baad clear/mark karo
+            cart.getCartItems().clear();
+            cart.setCartTotal(BigDecimal.ZERO);
+            cart.setCartStatus(CartStatus.CHECKED_OUT);
+            cart.setCheckedOutAt(Instant.now());
+            cartRepository.save(cart);
+
+
+            OrderEvent orderEvent = new OrderEvent();
+            orderEvent.setOrderId(savedOrder.getOrderId());
+            orderEvent.setUserId(savedOrder.getUserId());
+            orderEvent.setStatus(savedOrder.getOrderStatus().name());
+            orderEvent.setMessage("Order created successfully");
+            orderEvent.setTotalAmount(savedOrder.getTotalAmount());
+            orderEventPublisher.publishOrderEvent(orderEvent);
+
+            return toResponse(savedOrder);
+
+        } catch (RuntimeException ex) {
+            for (int i = reservedSnapshots.size() - 1; i >= 0; i--) {
+                CartItem item = cart.getCartItems().get(i);
+                try {
+                    inventoryClient.releaseByProductId(item.getProductId(), new ReleaseStockRequest(item.getQuantity()));
+                } catch (Exception releaseEx) {
+                    throw new ExternalServiceException("Checkout failed and stock rollback also failed for productId: " + item.getProductId(), releaseEx);
+                }
+            }
+            if (ex instanceof ExternalServiceException externalServiceException) {
+                throw externalServiceException;
+            }
+            throw new ExternalServiceException("Checkout failed", ex);
+        }
     }
 
     @Override
@@ -140,12 +169,32 @@ public class OrderServiceImpl implements OrderService {
         try {
             ReleaseStockRequest req = new ReleaseStockRequest();
             req.setQuantity(quantity);
-            inventoryClient.releaseStock(productId, req);
+            inventoryClient.releaseByProductId(productId, req);
         } catch (Exception ex) {
             // Log and continue — cancellation should not fail if inventory release fails
             log.warn("Failed to release reserved stock for productId={}, quantity={}: {}", productId, quantity, ex.getMessage());
         }
     }
+
+    @Override
+    public void updatePaymentStatus(UUID orderId, String paymentStatus) {
+        log.info("Updating payment status for Order ID: {} to {}", orderId, paymentStatus);
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found for id: " + orderId));
+
+        PaymentStatus parsedStatus = PaymentStatus.valueOf(paymentStatus);
+        order.setPaymentStatus(parsedStatus);
+
+        if (parsedStatus == PaymentStatus.FAILED) {
+            log.warn("Payment failed for Order ID: {}. Triggering compensation: cancelling order.", orderId);
+            order.setOrderStatus(OrderStatus.CANCELLED);
+            order.setCancelledAt(Instant.now());
+        }
+
+        orderRepository.save(order);
+        log.info("Payment status successfully updated for Order ID: {}", orderId);
+    }
+
 
     // Helper method to build Order entity from Cart and CheckoutRequest
     private Order buildOrderFromCart(Cart cart, CheckoutRequest request

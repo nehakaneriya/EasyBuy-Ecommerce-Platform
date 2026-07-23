@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import java.util.UUID;
 
 @FeignClient(
-        name ="${PRODUCT_SERVICE_NAME}"
+        name = "${PRODUCT_SERVICE_NAME:PRODUCT-SERVICE}"
 )
 public interface ProductFeignClient {
 

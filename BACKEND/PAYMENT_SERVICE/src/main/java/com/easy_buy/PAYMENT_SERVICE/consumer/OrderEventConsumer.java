@@ -2,17 +2,21 @@ package com.easy_buy.PAYMENT_SERVICE.consumer;
 
 import com.easy_buy.COMMON_SERVICE.events.OrderEvent;
 import com.easy_buy.COMMON_SERVICE.events.PaymentEvent;
+import com.easy_buy.PAYMENT_SERVICE.dto.request.PaymentRequest;
+import com.easy_buy.PAYMENT_SERVICE.dto.response.PaymentResponse;
 import com.easy_buy.PAYMENT_SERVICE.entity.Payment;
 import com.easy_buy.PAYMENT_SERVICE.entity.PaymentMethod;
 import com.easy_buy.PAYMENT_SERVICE.entity.PaymentStatus;
 import com.easy_buy.PAYMENT_SERVICE.producer.PaymentEventPublisher;
 import com.easy_buy.PAYMENT_SERVICE.repository.PaymentRepository;
+import com.easy_buy.PAYMENT_SERVICE.service.PaymentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -23,54 +27,49 @@ public class OrderEventConsumer {
 
     private final PaymentRepository paymentRepository;
     private final PaymentEventPublisher paymentEventPublisher;
+    private final PaymentService paymentService;
 
-    @KafkaListener(topics = "order-topic", groupId = "payment-service-group")
-    @Transactional
-    public void consumeOrderEvent(OrderEvent event) {
+    private final String ORDER_TOPIC = "order-topic";
 
-        log.info("OrderEvent received: orderId={}, userId={}, status={}, totalAmount={}",
-                event.getOrderId(), event.getUserId(), event.getStatus(), event.getTotalAmount());
+    @KafkaListener(topics = ORDER_TOPIC, groupId = "payment-group")
+    public void consumeOrderCreatedEvent(OrderEvent orderEvent) {
+        log.info("Received OrderEvent from Kafka: {}", orderEvent);
 
-        // Duplicate check — agar payment already exist karti hai to skip karo
-        if (paymentRepository.existsByOrderId(event.getOrderId())) {
-            log.warn("Payment already exists for orderId={} — skipping", event.getOrderId());
+        if (orderEvent.getOrderId() == null) {
+            log.error("Received OrderEvent with null orderId");
             return;
         }
 
-        // Sirf PENDING orders ka payment record banana hai
-        if (!"PENDING".equals(event.getStatus())) {
-            log.info("OrderEvent status is '{}' — skipping payment creation for orderId={}",
-                    event.getStatus(), event.getOrderId());
-            return;
-        }
+        try {
+            PaymentRequest paymentRequest = new PaymentRequest(
+                    orderEvent.getOrderId(),
+                    orderEvent.getUserId(),
+                    orderEvent.getTotalAmount() != null ? orderEvent.getTotalAmount() : BigDecimal.ZERO,
+                    PaymentMethod.ONLINE_PAYMENT,
+                    UUID.randomUUID().toString(),
+                    orderEvent.getMessage() != null ? orderEvent.getMessage() : "Kafka Order Event"
+            );
 
-        // Naya PENDING payment record banao
-        // paymentMethod abhi null hai — user baad mein checkout pe provide karega
-        Payment payment = Payment.builder()
-                .orderId(event.getOrderId())
-                .userId(event.getUserId())
-                .paymentNumber(UUID.randomUUID().toString())
-                .amount(event.getTotalAmount())
-                .paymentStatus(PaymentStatus.PENDING)
-                .paymentMethod(PaymentMethod.OFFLINE_PAYMENT) // default — update hoga jab user payment kare
-                .remarks("Auto-created from OrderEvent")
-                .build();
+            log.info("Processing payment via Kafka consumer for Order ID: {}", orderEvent.getOrderId());
+            PaymentResponse paymentResponse = paymentService.initiatePayment(paymentRequest);
 
-        Payment savedPayment = paymentRepository.save(payment);
-        log.info("Payment record created from OrderEvent: paymentId={}, orderId={}, amount={}",
-                savedPayment.getPaymentId(), savedPayment.getOrderId(), savedPayment.getAmount());
-
-        // OFFLINE_PAYMENT ke liye turant COMPLETED publish karo
-        if (savedPayment.getPaymentMethod() == PaymentMethod.OFFLINE_PAYMENT) {
-            savedPayment.setPaymentStatus(PaymentStatus.COMPLETED);
-            savedPayment.setPaidAt(Instant.now());
-            paymentRepository.save(savedPayment);
-
+            // Publish success acknowledgment event
             PaymentEvent paymentEvent = new PaymentEvent();
-            paymentEvent.setOrderId(savedPayment.getOrderId());
-            paymentEvent.setPaymentId(savedPayment.getPaymentId());
-            paymentEvent.setPaymentStatus(PaymentStatus.COMPLETED.name());
-            paymentEvent.setMessage("OFFLINE payment auto-completed");
+            paymentEvent.setOrderId(paymentResponse.getOrderId());
+            paymentEvent.setPaymentId(paymentResponse.getPaymentId());
+            paymentEvent.setPaymentStatus(paymentResponse.getPaymentStatus().name());
+            paymentEvent.setMessage("Payment processed successfully via Kafka consumer");
+            paymentEventPublisher.publishPaymentEvent(paymentEvent);
+
+        } catch (Exception e) {
+            log.error("Error processing payment via Kafka consumer for Order ID: {}", orderEvent.getOrderId(), e);
+
+            // Publish failure acknowledgment event
+            PaymentEvent paymentEvent = new PaymentEvent();
+            paymentEvent.setOrderId(orderEvent.getOrderId());
+            paymentEvent.setPaymentId(null);
+            paymentEvent.setPaymentStatus(PaymentStatus.FAILED.name());
+            paymentEvent.setMessage(e.getMessage());
             paymentEventPublisher.publishPaymentEvent(paymentEvent);
         }
     }

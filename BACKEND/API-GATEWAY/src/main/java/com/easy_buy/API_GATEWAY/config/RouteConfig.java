@@ -20,15 +20,18 @@ public class RouteConfig {
     private final String productServiceID;
     private final String CartOrderServiceID;
     private final String userServiceID;
+    private final String inventoryServiceID;
     private final AuthenticationFilter authFilter;
 
     public RouteConfig(@Value("${product.service.id}") String productServiceID,
                        @Value("${cart.order.service.id}") String CartOrderServiceID,
                        @Value("${user.service.id}") String userServiceID,
+                       @Value("${inventory.service.id}") String inventoryServiceID,
                        AuthenticationFilter authFilter) {
         this.productServiceID = productServiceID;
         this.CartOrderServiceID = CartOrderServiceID;
         this.userServiceID = userServiceID;
+        this.inventoryServiceID = inventoryServiceID;
         this.authFilter = authFilter;
     }
 
@@ -74,6 +77,13 @@ public class RouteConfig {
                                 .filter(authFilter.apply(new AuthenticationFilter.Config()))
                                 .stripPrefix(1))
                         .uri(userServiceID))
+
+                .route("inventory-service", r -> r
+                        .path("/inventory-service/**")
+                        .filters(f -> f
+                                .filter(authFilter.apply(new AuthenticationFilter.Config()))
+                                .stripPrefix(1))
+                        .uri(inventoryServiceID))
 
                 .build();
     }

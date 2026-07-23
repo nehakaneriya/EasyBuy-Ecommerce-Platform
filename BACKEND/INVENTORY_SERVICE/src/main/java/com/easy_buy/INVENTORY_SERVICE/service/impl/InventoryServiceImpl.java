@@ -6,6 +6,7 @@ import com.easy_buy.INVENTORY_SERVICE.dtos.request.*;
 import com.easy_buy.INVENTORY_SERVICE.dtos.response.InventoryResponse;
 import com.easy_buy.INVENTORY_SERVICE.entity.Inventory;
 import com.easy_buy.INVENTORY_SERVICE.exception.BusinessRuleException;
+import com.easy_buy.INVENTORY_SERVICE.exception.InsufficientStockException;
 import com.easy_buy.INVENTORY_SERVICE.exception.ResourceNotFoundException;
 import com.easy_buy.INVENTORY_SERVICE.repository.InventoryRepository;
 import com.easy_buy.INVENTORY_SERVICE.service.InventoryService;
@@ -35,10 +36,12 @@ public class InventoryServiceImpl implements InventoryService {
             productSnapshot = productClient.getProductById(request.getProductId());
         }
         catch (FeignException e){
-            throw new BusinessRuleException("Unable to contact Product Service" + e.getMessage());
+            throw new BusinessRuleException("Unable to contact Product Service: " + e.getMessage());
         }
 
-
+        if (productSnapshot == null) {
+            throw new BusinessRuleException("Product not found for productId: " + request.getProductId());
+        }
 
         String sku = normalizeSku(request.getSku());
 
@@ -51,11 +54,15 @@ public class InventoryServiceImpl implements InventoryService {
             throw new BusinessRuleException("Inventory already exists for productId: " + request.getProductId());
         }
 
+        String productName = StringUtils.hasText(request.getProductName())
+                ? trim(request.getProductName())
+                : trim(productSnapshot.getTitle());
+
         Inventory savedInventory = repository.save(
                 Inventory.builder()
                         .productId(request.getProductId())
                         .sku(sku)
-                        .productName(trim(request.getProductName()))
+                        .productName(productName)
                         .warehouseLocation(trim(request.getWarehouseLocation()))
                         .availableQuantity(defaultZero(request.getAvailableQuantity()))
                         .reservedQuantity(defaultZero(request.getReservedQuantity()))
@@ -72,10 +79,18 @@ public class InventoryServiceImpl implements InventoryService {
         Inventory inventory = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Inventory not found for id: " + id));
 
-        inventory.setProductName(trim(request.getProductName()));
-        inventory.setWarehouseLocation(trim(request.getWarehouseLocation()));
-        inventory.setReorderLevel(defaultZero(request.getReorderLevel()));
-        inventory.setActive(request.getActive() == null || request.getActive());
+        if (StringUtils.hasText(request.getProductName())) {
+            inventory.setProductName(trim(request.getProductName()));
+        }
+        if (StringUtils.hasText(request.getWarehouseLocation())) {
+            inventory.setWarehouseLocation(trim(request.getWarehouseLocation()));
+        }
+        if (request.getReorderLevel() != null) {
+            inventory.setReorderLevel(request.getReorderLevel());
+        }
+        if (request.getActive() != null) {
+            inventory.setActive(request.getActive());
+        }
 
         Inventory updatedInventory = repository.save(inventory);
         return toResponse(updatedInventory);
@@ -131,7 +146,7 @@ public class InventoryServiceImpl implements InventoryService {
     // Adjust Stock
     @Override
     public InventoryResponse adjustStock(UUID id, AdjustStockRequest request) {
-        Inventory inventory = repository.findById(id)
+        Inventory inventory = repository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Inventory not found for id: " + id));
 
         int updatedQuantity = inventory.getAvailableQuantity() + request.getQuantityDelta();
@@ -200,9 +215,6 @@ public class InventoryServiceImpl implements InventoryService {
     private int defaultZero(Integer value) {
         return value == null ? 0 : value;
     }
-    private int safeInt(Integer value) {
-        return value == null ? 0 : value;
-    }
 
     // Entity -> Response DTO
     private InventoryResponse toResponse(Inventory inventory) {
@@ -215,9 +227,9 @@ public class InventoryServiceImpl implements InventoryService {
                 .availableQuantity(inventory.getAvailableQuantity())
                 .reservedQuantity(inventory.getReservedQuantity())
                 .reorderLevel(inventory.getReorderLevel())
-                .totalQuantity(inventory.getAvailableQuantity() + inventory.getReservedQuantity())
-                .lowStock(inventory.getAvailableQuantity() <= inventory.getReorderLevel())
-                .inStock(inventory.getAvailableQuantity() > 0)
+                .totalQuantity(inventory.getTotalQuantity())
+                .lowStock(inventory.isLowStock())
+                .inStock(inventory.isInStock())
                 .active(inventory.getActive())
                 .createdAt(inventory.getCreatedAt())
                 .updatedAt(inventory.getUpdatedAt())
@@ -227,12 +239,12 @@ public class InventoryServiceImpl implements InventoryService {
     // Common Reserve Logic
     private InventoryResponse reserveStock(Inventory inventory, int quantity) {
         if (inventory.getAvailableQuantity() < quantity) {
-            throw new BusinessRuleException("Insufficient stock available");
+            throw new InsufficientStockException("Insufficient stock available");
         }
         inventory.setAvailableQuantity(inventory.getAvailableQuantity() - quantity);
         inventory.setReservedQuantity(inventory.getReservedQuantity() + quantity);
 
-        inventory.setReasonForAdjustment("Reserved " + quantity + "items");
+        inventory.setReasonForAdjustment("Reserved " + quantity + " items");
         Inventory updatedInventory = repository.save(inventory);
         return toResponse(updatedInventory);
     }
@@ -240,12 +252,12 @@ public class InventoryServiceImpl implements InventoryService {
     // Common Release Logic
     private InventoryResponse releaseStock(Inventory inventory, int quantity) {
         if (inventory.getReservedQuantity() < quantity) {
-            throw new BusinessRuleException("Reserved quantity is insufficient");
+            throw new InsufficientStockException("Reserved quantity is insufficient");
         }
         inventory.setReservedQuantity(inventory.getReservedQuantity() - quantity);
         inventory.setAvailableQuantity(inventory.getAvailableQuantity() + quantity);
 
-        inventory.setReasonForAdjustment("Released " + quantity + "items");
+        inventory.setReasonForAdjustment("Released " + quantity + " items");
         Inventory updatedInventory = repository.save(inventory);
         return toResponse(updatedInventory);
     }
